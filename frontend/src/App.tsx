@@ -1,10 +1,9 @@
 import { useEffect, useCallback, useState, useMemo } from "react";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
-import { useSetActiveWallet } from "@privy-io/wagmi";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useChainId } from "wagmi";
 import { injected } from "wagmi/connectors";
 import { monadTestnet, RELAY_CONFIG, type AuthMode } from "./config/wagmi";
 import { useMeraWallet } from "./hooks/useMeraWallet";
+import type { PrivyWallet } from "./hooks/usePrivyWallet";
 import { MERA_ENABLED } from "./utils/mera";
 import { checkPendingVote, relayHealth } from "./utils/relay";
 import type { Address } from "viem";
@@ -16,11 +15,9 @@ import { GameStatusPanel } from "./components/GameStatusPanel";
 import { PartyPanel } from "./components/PartyPanel";
 import "./App.css";
 
-function App() {
+function App({ privy }: { privy?: PrivyWallet }) {
   const mera = useMeraWallet();
-  const { login, logout, ready, authenticated } = usePrivy();
-  const { wallets, ready: walletsReady } = useWallets();
-  const { setActiveWallet } = useSetActiveWallet();
+  const { login, logout, ready = true, authenticated = false, wallets, walletsReady = true, setActiveWallet } = privy ?? {};
   const { address, isConnected: walletConnected, connector } = useAccount();
 
   // Direct wallet connection (wagmi)
@@ -48,7 +45,7 @@ function App() {
       : null;
 
   // Get embedded wallet address (for native Privy transactions)
-  const embeddedWallet = wallets.find((w) => w.walletClientType === "privy");
+  const embeddedWallet = wallets?.find((w) => w.walletClientType === "privy");
   const embeddedWalletAddress = embeddedWallet?.address;
   const {
     isConnected: indexerConnected,
@@ -91,7 +88,7 @@ function App() {
       ready,
       authenticated,
       walletsReady,
-      walletCount: wallets.length,
+      walletCount: wallets?.length ?? 0,
       walletConnected,
       connectorName: connector?.name,
       address,
@@ -101,7 +98,7 @@ function App() {
   // Connect Privy wallet to wagmi when user authenticates
   useEffect(() => {
     const connectWallet = async () => {
-      if ((selectedLogin === "privy" || selectedLogin === "auto") && authenticated && walletsReady && wallets.length > 0 && !walletConnected) {
+      if ((selectedLogin === "privy" || selectedLogin === "auto") && authenticated && walletsReady && wallets?.length && setActiveWallet && !walletConnected) {
         // Find embedded wallet or use the first available wallet
         const embeddedWallet = wallets.find((w) => w.walletClientType === "privy");
         const walletToConnect = embeddedWallet || wallets[0];
@@ -123,7 +120,7 @@ function App() {
     mera.lock();
     setSelectedLogin("privy");
     if (!authenticated) {
-      login();
+      login?.();
     }
   };
 
@@ -151,7 +148,7 @@ function App() {
   const handleDisconnect = () => {
     mera.lock();
     if (authMode === "privy" || authMode === "relay") {
-      logout();
+      logout?.();
     } else if (authMode === "direct") {
       disconnectWagmi();
     }
@@ -253,13 +250,13 @@ function App() {
               <div className="login-options">
                 {MERA_ENABLED && <button className="connect-btn" disabled={mera.busy} onClick={() => handlePasskey("create")}>Create passkey account</button>}
                 <button className="connect-btn wallet-btn" disabled={mera.busy} onClick={() => handlePasskey("discover")}>Use existing passkey</button>
-                <button
+                {privy && <button
                   onClick={handlePrivyLogin}
                   disabled={isLoading}
                   className="connect-btn privy-btn"
                 >
                   {isLoading ? "Loading..." : "Login (Gasless)"}
-                </button>
+                </button>}
                 <span className="login-divider">or</span>
                 <button
                   onClick={handleDirectConnect}
@@ -276,6 +273,12 @@ function App() {
         {selectedLogin === "mera" && <div className="passkey-status" aria-live="polite">
           {mera.busy && <p>Complete the passkey prompt on your device. <button onClick={mera.lock}>Cancel</button></p>}
           {mera.error && <p className="error">{mera.error}</p>}
+          {mera.diagnostics && <details className="passkey-diagnostics">
+            <summary>Passkey diagnostics</summary>
+            <p>These details contain the failure stage and browser information. You can copy them when asking for help.</p>
+            <pre>{mera.diagnostics}</pre>
+            <a href="https://github.com/category-labs/mera/blob/main/docs/src/content/docs/authenticator-support.md" target="_blank" rel="noreferrer">Supported passkey providers</a>
+          </details>}
           {!isLoggedIn && <p>A new passkey creates a separate wallet. Existing wallets keep their own addresses.</p>}
         </div>}
         {voteStatus?.address === displayAddress && <p className="passkey-status" role="status">{voteStatus?.message}</p>}
@@ -323,7 +326,7 @@ function App() {
           <div className="controls-column">
             <div className="controls-chat-row">
               <div className="controls-container">
-                <VoteButtons key={`${authMode}:${displayAddress}`} disabled={!canVote} disabledReason={authMode === "mera" ? passkeyDisabledReason : undefined} authMode={authMode} meraVote={mera.vote} />
+                <VoteButtons key={`${authMode}:${displayAddress}`} disabled={!canVote} disabledReason={authMode === "mera" ? passkeyDisabledReason : undefined} authMode={authMode} meraVote={mera.vote} privyVote={privy?.vote} />
               </div>
 
               <VoteChat

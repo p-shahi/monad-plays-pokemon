@@ -98,7 +98,7 @@ npm run dev
 - `VITE_CONTRACT_ADDRESS`: Deployed contract address
 - `VITE_RPC_URL`: `https://testnet-rpc.monad.xyz`
 - `VITE_INDEXER_URL`: Indexer WebSocket URL (default: `http://localhost:3001`)
-- `VITE_PRIVY_APP_ID`: Privy App ID for embedded wallets
+- `VITE_PRIVY_APP_ID`: Optional Privy App ID for embedded wallets. Mera and injected wallets work without it.
 - `VITE_RELAY_ENABLED`: Enable EIP-7702 gasless relay (default: false)
 - `VITE_DELEGATION_CONTRACT`: Deployed SimpleDelegation contract address
 - `VITE_RELAY_API_URL`: Relay API URL (default: `http://localhost:3001`)
@@ -110,7 +110,7 @@ Mera adds passkey accounts alongside Privy and injected wallets. Create a passke
 Mera is enabled by default. To configure it:
 
 1. Set `VITE_MERA_RP_ID` to the exact stable frontend hostname, and optionally `VITE_MERA_RP_NAME`. Remove any existing `VITE_MERA_ENABLED=false` override or set it to `true`. Use HTTPS in production or `localhost` locally. A changed hostname cannot unlock the old hostname's passkeys.
-2. Configure both `VITE_RELAY_ENABLED=true` and backend `RELAY_ENABLED=true`. Frontend and backend must use the same vote contract, delegation contract, and Monad Testnet network. Keep the existing Privy app configuration for the other login options.
+2. Configure both `VITE_RELAY_ENABLED=true` and backend `RELAY_ENABLED=true`. Frontend and backend must use the same vote contract, delegation contract, and Monad Testnet network. Set a valid `VITE_PRIVY_APP_ID` to also offer Privy login; Mera and injected wallets work without it.
 3. Fund the backend relay wallet and configure its spending limits in `indexer/.env`. Set `SAVE_DIR` to a persistent Railway volume. The relay writes `relay.json` there before broadcasting and uses `relay.lock` for exclusive ownership. Run one relay writer per sponsor wallet, including during deployment handover.
 4. Build and deploy both applications together. Older relay clients are asked to refresh. New relay requests include their execution nonce and deterministic request ID.
 

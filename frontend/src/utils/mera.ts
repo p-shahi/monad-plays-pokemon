@@ -99,11 +99,37 @@ export async function exportMeraPhrase(identity: MeraIdentity) {
 export function meraError(error: unknown) {
   if (isMeraError(error)) {
     switch (error.code) {
-      case "PRF_UNAVAILABLE": return "This authenticator cannot unlock a passkey account. Try a PRF-capable passkey provider or another login option.";
+      case "PRF_UNAVAILABLE": return "The selected passkey provider did not supply the encryption support (PRF) needed to open a wallet. Check the passkey diagnostics below.";
       case "PASSKEY_OPERATION_FAILED": return "Passkey request cancelled or unavailable. If creation already succeeded, try Use existing passkey.";
       case "SESSION_ENDED": return "Your passkey account is locked. Unlock it to vote.";
       case "CRYPTO_UNAVAILABLE": return "This browser does not provide the required cryptography APIs.";
     }
   }
   return error instanceof Error ? error.message : "Passkey operation failed.";
+}
+
+export function meraDiagnostics(error: unknown, operation: string) {
+  if (!isMeraError(error) || error.code !== "PRF_UNAVAILABLE") return;
+  // Mera 0.2.0 distinguishes these failures by message, using one shared error code.
+  let reason: string;
+  switch (error.message) {
+    case "Authenticator did not enable PRF":
+      reason = "Registration completed. PRF was requested, but the response reported neither PRF support nor PRF output. The passkey may have been saved without a usable wallet.";
+      break;
+    case "Authenticator did not return PRF output":
+      reason = "Authentication completed. PRF was requested, but the response contained no PRF output.";
+      break;
+    case "PRF output must be 32 bytes":
+      reason = "PRF output was returned, but its length was invalid. Mera requires 32 bytes.";
+      break;
+    default:
+      reason = "PRF was unavailable. Mera did not identify a recognized failure stage.";
+  }
+  return [
+    `Action: ${operation}`,
+    "Mera: 0.2.0 / PRF_UNAVAILABLE",
+    reason,
+    `Origin: ${location.origin}`,
+    `Browser: ${navigator.userAgent}`,
+  ].join("\n");
 }

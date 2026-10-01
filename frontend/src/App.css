@@ -56,6 +56,9 @@ body {
 
 .auth-badge[data-mode="mera"] { background: #6354bd; color: white; }
 .passkey-status { color: #bbb; font-size: 0.85rem; }
+.passkey-diagnostics { max-width: 42rem; margin: 0.75rem auto; text-align: left; }
+.passkey-diagnostics summary { cursor: pointer; }
+.passkey-diagnostics pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .passkey-backup { max-width: 38rem; margin: 1rem auto; padding: 1rem; background: #202035; border-radius: 8px; }
 .passkey-backup h2 { font-size: 1rem; }
 .passkey-backup p { line-height: 1.5; }

@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { useWallets, useSign7702Authorization } from "@privy-io/react-auth";
-import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { useWriteContract } from "wagmi";
-import { encodeFunctionData, type Address, type Hex } from "viem";
-import { Action, CONTRACT_ADDRESS, CONTRACT_ABI, RELAY_CONFIG, monadTestnet, type ActionType, type AuthMode } from "../config/wagmi";
-import { submitRelayVote } from "../utils/relay";
+import { type Hex } from "viem";
+import { Action, CONTRACT_ADDRESS, CONTRACT_ABI, type ActionType, type AuthMode } from "../config/wagmi";
+import type { PrivyWallet } from "../hooks/usePrivyWallet";
 import "./VoteButtons.css";
 
 const VOTE_COOLDOWN_MS = Number(import.meta.env.VITE_VOTE_COOLDOWN_MS || "500");
@@ -14,9 +12,10 @@ interface VoteButtonsProps {
   disabledReason?: string;
   authMode?: AuthMode;
   meraVote: (action: ActionType, signal: AbortSignal, onSubmitted: () => void) => Promise<void>;
+  privyVote?: PrivyWallet["vote"];
 }
 
-export function VoteButtons({ disabled, disabledReason, authMode, meraVote }: VoteButtonsProps) {
+export function VoteButtons({ disabled, disabledReason, authMode, meraVote, privyVote }: VoteButtonsProps) {
   const [pendingAction, setPendingAction] = useState<ActionType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isVoting, setIsVoting] = useState(false);
@@ -25,9 +24,6 @@ export function VoteButtons({ disabled, disabledReason, authMode, meraVote }: Vo
   const lastVote = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const sentTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const { wallets } = useWallets();
-  const { signAuthorization } = useSign7702Authorization();
-  const { client: smartWalletClient } = useSmartWallets();
   const { writeContractAsync, isPending: isWriting } = useWriteContract();
 
   useEffect(() => () => {
@@ -54,39 +50,9 @@ export function VoteButtons({ disabled, disabledReason, authMode, meraVote }: Vo
     try {
       if (authMode === "mera") {
         await meraVote(action, abort.signal, submitted);
-      } else if (authMode === "relay") {
-        const userWallet = wallets.find(wallet => wallet.walletClientType === "privy") || wallets[0];
-        if (!userWallet) throw new Error("No wallet connected");
-        const provider = await userWallet.getEthereumProvider();
-        await submitRelayVote({
-          address: userWallet.address as Address,
-          assertActive: () => abort.signal.throwIfAborted(),
-          signMessage: async hash => provider.request({ method: "personal_sign", params: [hash, userWallet.address] }) as Promise<Hex>,
-          signAuthorization: async nonce => {
-            abort.signal.throwIfAborted();
-            if (userWallet.walletClientType !== "privy") throw new Error("Use Connect Wallet for direct voting with this wallet.");
-            const authorization = await signAuthorization({
-              contractAddress: RELAY_CONFIG.delegationContract as Hex,
-              chainId: monadTestnet.id, nonce,
-            }, { address: userWallet.address });
-            return { chainId: authorization.chainId, nonce: authorization.nonce, r: authorization.r, s: authorization.s, yParity: authorization.yParity! };
-          },
-        }, action, abort.signal, submitted);
-      } else if (authMode === "privy") {
-        if (!smartWalletClient) throw new Error("Smart wallet is still connecting.");
-        const isDeployed = await smartWalletClient.account?.isDeployed();
-        abort.signal.throwIfAborted();
-        await smartWalletClient.sendTransaction({
-          calls: [{
-            to: CONTRACT_ADDRESS as Hex,
-            data: encodeFunctionData({ abi: CONTRACT_ABI, functionName: "vote", args: [action] }),
-          }],
-          ...(isDeployed ? {
-            callGasLimit: 15000n, verificationGasLimit: 130000n, preVerificationGas: 165000n,
-            maxFeePerGas: 155000000000n, maxPriorityFeePerGas: 2500000000n,
-          } : {}),
-        }, { uiOptions: { showWalletUIs: false } });
-        submitted();
+      } else if (authMode === "relay" || authMode === "privy") {
+        if (!privyVote) throw new Error("Privy login is unavailable.");
+        await privyVote(authMode, action, abort.signal, submitted);
       } else if (authMode === "direct") {
         await writeContractAsync({ address: CONTRACT_ADDRESS as Hex, abi: CONTRACT_ABI, functionName: "vote", args: [action] });
         submitted();

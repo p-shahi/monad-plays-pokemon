@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { VoteButtons } from "../src/components/VoteButtons";
+import { usePrivyWallet } from "../src/hooks/usePrivyWallet";
 import { submitRelayVote } from "../src/utils/relay";
 
 const fixtures = vi.hoisted(() => ({
@@ -12,9 +13,11 @@ const fixtures = vi.hoisted(() => ({
   signAuthorization: vi.fn(async () => ({ chainId: 10143, nonce: 0, r: "0x11", s: "0x22", yParity: 0 })),
 }));
 vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: () => ({ ready: true, authenticated: true, login: vi.fn(), logout: vi.fn() }),
   useWallets: () => ({ wallets: [{ address: fixtures.owner, walletClientType: "privy", getEthereumProvider: async () => ({ request: fixtures.request }) }] }),
   useSign7702Authorization: () => ({ signAuthorization: fixtures.signAuthorization }),
 }));
+vi.mock("@privy-io/wagmi", () => ({ useSetActiveWallet: () => ({ setActiveWallet: vi.fn() }) }));
 vi.mock("@privy-io/react-auth/smart-wallets", () => ({ useSmartWallets: () => ({}) }));
 vi.mock("wagmi", () => ({ useWriteContract: () => ({ isPending: false }) }));
 vi.mock("../src/config/wagmi", () => ({
@@ -25,13 +28,18 @@ vi.mock("../src/config/wagmi", () => ({
 vi.mock("../src/utils/relay", () => ({ submitRelayVote: vi.fn() }));
 afterEach(cleanup);
 
+function PrivyVoteButtons() {
+  const privy = usePrivyWallet();
+  return <VoteButtons authMode="relay" meraVote={vi.fn()} privyVote={privy.vote} />;
+}
+
 it("uses Privy's raw personal_sign payload and authorization hook for relay voting", async () => {
   vi.mocked(submitRelayVote).mockImplementation(async signer => {
     signer.assertActive();
     await signer.signMessage(fixtures.hash);
     await signer.signAuthorization(0);
   });
-  render(<VoteButtons authMode="relay" meraVote={vi.fn()} />);
+  render(<PrivyVoteButtons />);
   fireEvent.click(screen.getByRole("button", { name: "A" }));
   await waitFor(() => expect(fixtures.signAuthorization).toHaveBeenCalledOnce());
   expect(fixtures.request).toHaveBeenCalledWith({ method: "personal_sign", params: [fixtures.hash, fixtures.owner] });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Hex } from "viem";
 import { monadTestnet, RELAY_CONFIG, type ActionType } from "../config/wagmi";
-import { IDLE_TIMEOUT, MERA_ENABLED, exportMeraPhrase, loadMeraIdentity, meraError, openMeraAccount, rememberMeraIdentity } from "../utils/mera";
+import { IDLE_TIMEOUT, MERA_ENABLED, exportMeraPhrase, loadMeraIdentity, meraDiagnostics, meraError, openMeraAccount, rememberMeraIdentity } from "../utils/mera";
 import { submitRelayVote } from "../utils/relay";
 
 export function useMeraWallet() {
@@ -9,6 +9,7 @@ export function useMeraWallet() {
   const [unlocked, setUnlocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [diagnostics, setDiagnostics] = useState<string>();
   const [phrase, setPhrase] = useState<string>();
   const wallet = useRef<Awaited<ReturnType<typeof openMeraAccount>>>(undefined);
   const generation = useRef(0);
@@ -56,6 +57,7 @@ export function useMeraWallet() {
     const current = generation.current;
     setBusy(true);
     setError(undefined);
+    setDiagnostics(undefined);
     try {
       const opened = await openMeraAccount(mode, identity);
       if (generation.current !== current) { opened.end(); return; }
@@ -66,7 +68,10 @@ export function useMeraWallet() {
       setIdentity(opened.identity);
       setUnlocked(true);
     } catch (cause) {
-      if (generation.current === current) setError(meraError(cause));
+      if (generation.current === current) {
+        setError(meraError(cause));
+        setDiagnostics(meraDiagnostics(cause, mode));
+      }
     } finally {
       ceremony.current = false;
       setBusy(false);
@@ -79,11 +84,15 @@ export function useMeraWallet() {
     const current = generation.current;
     setBusy(true);
     setError(undefined);
+    setDiagnostics(undefined);
     try {
       const exported = await exportMeraPhrase(identity);
       if (generation.current === current) setPhrase(exported);
     } catch (cause) {
-      if (generation.current === current) setError(meraError(cause));
+      if (generation.current === current) {
+        setError(meraError(cause));
+        setDiagnostics(meraDiagnostics(cause, "export recovery phrase"));
+      }
     } finally { ceremony.current = false; setBusy(false); }
   };
 
@@ -109,5 +118,5 @@ export function useMeraWallet() {
     }, action, signal, onSubmitted);
   };
 
-  return { address: identity?.address, unlocked, busy, error, phrase, connect, lock, revealPhrase, hidePhrase: () => setPhrase(undefined), vote };
+  return { address: identity?.address, unlocked, busy, error, diagnostics, phrase, connect, lock, revealPhrase, hidePhrase: () => setPhrase(undefined), vote };
 }

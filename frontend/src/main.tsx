@@ -6,25 +6,25 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { PrivyProvider } from "@privy-io/react-auth";
 import { SmartWalletsProvider } from "@privy-io/react-auth/smart-wallets";
-import { WagmiProvider } from "@privy-io/wagmi";
+import { WagmiProvider as PrivyWagmiProvider } from "@privy-io/wagmi";
+import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { wagmiConfig, monadTestnet } from "./config/wagmi";
+import { wagmiConfig, monadTestnet, PRIVY_APP_ID, PRIVY_ENABLED } from "./config/wagmi";
+import { usePrivyWallet } from "./hooks/usePrivyWallet";
 import "./index.css";
 import App from "./App.tsx";
 
 const queryClient = new QueryClient();
 
-// Get Privy App ID from environment variable
-const privyAppId = import.meta.env.VITE_PRIVY_APP_ID;
-
-if (!privyAppId) {
-  console.warn("VITE_PRIVY_APP_ID not set. Get one at https://console.privy.io");
+function PrivyApp() {
+  const privy = usePrivyWallet();
+  return <App privy={privy} />;
 }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <PrivyProvider
-      appId={privyAppId || "placeholder-app-id"}
+    {PRIVY_ENABLED ? <PrivyProvider
+      appId={PRIVY_APP_ID!}
       config={{
         appearance: {
           theme: "dark",
@@ -42,11 +42,17 @@ createRoot(document.getElementById("root")!).render(
     >
       <SmartWalletsProvider>
         <QueryClientProvider client={queryClient}>
-          <WagmiProvider config={wagmiConfig}>
-            <App />
-          </WagmiProvider>
+          <PrivyWagmiProvider config={wagmiConfig}>
+            <PrivyApp />
+          </PrivyWagmiProvider>
         </QueryClientProvider>
       </SmartWalletsProvider>
-    </PrivyProvider>
+    </PrivyProvider> : (
+      <QueryClientProvider client={queryClient}>
+        <WagmiProvider config={wagmiConfig}>
+          <App />
+        </WagmiProvider>
+      </QueryClientProvider>
+    )}
   </StrictMode>
 );

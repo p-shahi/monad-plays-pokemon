@@ -1,9 +1,11 @@
-import { http } from "wagmi";
+import { createConfig, http } from "wagmi";
 import { injected } from "wagmi/connectors";
-import { createConfig } from "@privy-io/wagmi";
+import { createConfig as createPrivyConfig } from "@privy-io/wagmi";
 import { createPublicClient, defineChain } from "viem";
 
 const rpcUrl = import.meta.env.VITE_RPC_URL || "https://testnet-rpc.monad.xyz";
+export const PRIVY_APP_ID = import.meta.env.VITE_PRIVY_APP_ID?.trim();
+export const PRIVY_ENABLED = PRIVY_APP_ID?.length === 25;
 export type AuthMode = "privy" | "direct" | "relay" | "mera" | null;
 
 // Define Monad Testnet chain
@@ -32,13 +34,14 @@ export const monadTestnet = defineChain({
 
 // Create wagmi config with direct wallet connectors
 // Privy handles embedded wallets, these connectors handle direct EOA connections
-export const wagmiConfig = createConfig({
+const createWalletConfig = PRIVY_ENABLED ? createPrivyConfig : createConfig;
+export const wagmiConfig = createWalletConfig({
   chains: [monadTestnet] as const,
   connectors: [injected()],
   transports: {
     [monadTestnet.id]: http(rpcUrl),
   },
-} as Parameters<typeof createConfig>[0]);
+} as Parameters<typeof createPrivyConfig>[0]);
 
 export const publicClient = createPublicClient({ chain: monadTestnet, transport: http(rpcUrl), pollingInterval: 500 });
 
