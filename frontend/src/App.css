@@ -48,9 +48,18 @@ body {
 
 .wallet-info {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 0.75rem;
 }
+
+.auth-badge[data-mode="mera"] { background: #6354bd; color: white; }
+.passkey-status { color: #bbb; font-size: 0.85rem; }
+.passkey-backup { max-width: 38rem; margin: 1rem auto; padding: 1rem; background: #202035; border-radius: 8px; }
+.passkey-backup h2 { font-size: 1rem; }
+.passkey-backup p { line-height: 1.5; }
+.recovery-phrase { padding: 1rem; font-family: monospace; background: #111120; overflow-wrap: anywhere; }
 
 .address {
   background: #1a1a2e;

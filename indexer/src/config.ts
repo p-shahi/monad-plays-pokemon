@@ -7,6 +7,7 @@ export const config = {
 
   // Monad HTTP RPC URL (for polling)
   httpRpcUrl: process.env.HTTP_RPC_URL || "https://testnet-rpc.monad.xyz",
+  chainId: Number(process.env.CHAIN_ID || "10143"),
 
   // Contract address (set after deployment)
   contractAddress: process.env.CONTRACT_ADDRESS || "",
@@ -32,6 +33,11 @@ export const config = {
     maxGasPrice: parseInt(process.env.RELAY_MAX_GAS_PRICE || "200", 10),
     // Signature validity duration (seconds)
     signatureValiditySeconds: parseInt(process.env.RELAY_SIGNATURE_VALIDITY || "300", 10),
+    dailyBudget: process.env.RELAY_DAILY_BUDGET_MON || "1",
+    minBalance: process.env.RELAY_MIN_BALANCE_MON || "0.01",
+    maxPending: Number(process.env.RELAY_MAX_PENDING || "64"),
+    addressLimit: Number(process.env.RELAY_ADDRESS_LIMIT_PER_MINUTE || "60"),
+    ipLimit: Number(process.env.RELAY_IP_LIMIT_PER_MINUTE || "120"),
   },
 };
 

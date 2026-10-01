@@ -1,47 +1,31 @@
-# Project: MonadPlaysPokemon (Twitch Plays Pokémon on Monad)
+# Monad Plays Pokemon
 
-## Context
-We are building a Proof-of-Concept (POC) for a decentralized "Twitch Plays Pokémon" experience running on the Monad blockchain.
-* **Goal:** Leverage Monad's 400ms block time to create a collaborative gaming experience where users vote on game inputs via blockchain transactions.
-* **Core Loop:** Users vote -> Smart Contract Events -> Off-chain Indexer aggregates votes -> Winner elected per "Window" -> Emulator executes move.
+This proof of concept collects on-chain votes on Monad Testnet. The indexer runs one authoritative Pokemon Red emulator, aggregates votes into block windows, and streams frames to viewers.
 
-## Architecture Overview
+## Components
 
-### 1. Smart Contract (The Ballot Box)
-* **Role:** Extremely lightweight event emitter. No state storage to minimize gas.
-* **Optimization:** Relies entirely on `logs` for data availability.
+- `contracts/src/MonadPlaysPokemon.sol` emits `VoteCast(msg.sender, action)`.
+- `contracts/src/SimpleDelegation.sol` verifies signed EIP-7702 executions. Its nonce lives in the delegated EOA's storage.
+- `indexer/src/index.ts` runs vote ingestion, aggregation, emulator state, HTTP, Socket.io, and frame streaming.
+- `indexer/src/relay.ts` validates and sponsors signed votes. `relayStore.ts` journals signed transactions and spending reservations under `SAVE_DIR` before broadcast.
+- `frontend/src/App.tsx` selects the active identity: Privy, injected wallet, or Mera passkey account.
+- `frontend/src/utils/mera.ts` fixes account derivation. `hooks/useMeraWallet.ts` owns the signing session. `utils/relay.ts` is shared by Mera and Privy relay voting.
 
-### 2. Indexer (The Brain)
-* **Role:** Listens to the chain, buckets votes into time windows (denominated in blocks), calculates the winning move, and broadcasts it to the frontend.
-* **Tech:** Node.js, Ethers.js (WebSocket Provider), Socket.io (Server).
+## Working conventions
 
-### 3. Frontend (The View)
-* **Role:** Renders the GameBoy emulator, handles wallet connection, and submits vote transactions.
-* **Tech:** React, `boytacean` (or similar WASM GBA emulator), Socket.io (Client).
-* **Note for POC:** The emulator runs locally on the client for this version. The client receives the "official" moves from the Indexer to keep the input stream synchronized, though game state (RNG) may diverge in a local-only setup.
+Use Node 24. Frontend and indexer have separate npm dependencies and builds. Initialize the OpenZeppelin submodule before building contracts.
 
----
+Mera uses the default PRF salt and BIP-39/BIP-32 path `m/44'/60'/0'/0/0` with an empty passphrase. Treat these and the production RP ID as persistent account configuration. Never store or log passkey output, seeds, private keys, or recovery phrases.
 
-## Phase 1: Smart Contract Development
+A submitted transaction hash is not a completed vote. Reconcile the receipt and matching event. Preserve pending request identity across reload, logout, and server restart. Keep one relay writer per sponsor and persistent journal; never reset the journal to clear a nonce error.
 
-**Objective:** Deploy a gas-minimized contract to Monad Testnet.
+The implementation plan is in `docs/mera-integration-plan.md`. Deployment settings and recovery instructions are in `README.md` and the application `.env.example` files.
 
-1.  **Contract Specifications:**
-    * **Name:** `MonadPlays.sol`
-    * **Enum:** `Action { UP, DOWN, LEFT, RIGHT, A, B, START, SELECT }`
-    * **Events:** `event VoteCast(address indexed player, Action action);`
-    * **Functions:**
-        * `vote(Action _action) external`: Accepts an enum. Emits `VoteCast`. Does **not** write to storage.
-2.  **Tasks:**
-    * Write `MonadPlays.sol`.
-    * Create a Hardhat/Foundry script to deploy to Monad Testnet.
-    * **Output:** Save the deployed Contract Address and ABI.
+## Checks
 
----
+- Frontend: `npm test`, `npm run build`, `npm run lint`.
+- Relay integration: `npm run test:integration` in `frontend`, with Forge and Anvil installed.
+- Indexer: `npm run build`.
+- Contracts: `forge test`.
 
-## Phase 2: High-Performance Indexer
-
-**Objective:** precise vote aggregation using Monad WebSockets.
-
-1.  **Configuration:**
-    * `WINDOW_SIZE`: Configurable integer (e.g., 5 blocks).
+Use real passkeys and the intended deployment for browser/provider and Monad Testnet smoke checks. Local signing and Anvil tests cover their own boundaries.

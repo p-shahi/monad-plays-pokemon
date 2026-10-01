@@ -1,6 +1,9 @@
 {
   "name": "monad-plays-indexer",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=24"
+  },
   "description": "Vote aggregation indexer for MonadPlaysPokemon",
   "main": "dist/index.js",
   "scripts": {
@@ -19,13 +22,17 @@
     "dotenv": "^17.2.3",
     "ethers": "^6.16.0",
     "express": "^5.2.1",
+    "proper-lockfile": "4.1.2",
     "serverboy": "^0.0.7",
     "sharp": "^0.34.5",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "ws": "8.19.0",
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.1",
+    "@types/proper-lockfile": "4.1.4",
     "@types/sharp": "^0.32.0",
     "@types/ws": "^8.18.1",
     "socket.io-client": "^4.8.1",

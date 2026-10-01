@@ -3,7 +3,11 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSetActiveWallet } from "@privy-io/wagmi";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useChainId } from "wagmi";
 import { injected } from "wagmi/connectors";
-import { monadTestnet, RELAY_CONFIG } from "./config/wagmi";
+import { monadTestnet, RELAY_CONFIG, type AuthMode } from "./config/wagmi";
+import { useMeraWallet } from "./hooks/useMeraWallet";
+import { MERA_ENABLED } from "./utils/mera";
+import { checkPendingVote, relayHealth } from "./utils/relay";
+import type { Address } from "viem";
 import { useSocket } from "./hooks/useSocket";
 import { VoteButtons } from "./components/VoteButtons";
 import { GameScreen } from "./components/GameScreen";
@@ -12,10 +16,8 @@ import { GameStatusPanel } from "./components/GameStatusPanel";
 import { PartyPanel } from "./components/PartyPanel";
 import "./App.css";
 
-// Auth modes: "privy" for email/social with AA, "direct" for EOA wallet, "relay" for EIP-7702 backend relay
-type AuthMode = "privy" | "direct" | "relay" | null;
-
 function App() {
+  const mera = useMeraWallet();
   const { login, logout, ready, authenticated } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
   const { setActiveWallet } = useSetActiveWallet();
@@ -32,12 +34,18 @@ function App() {
   // Create injected connector
   const injectedConnector = useMemo(() => injected(), []);
 
-  // Track auth mode
-  const [authMode, setAuthMode] = useState<AuthMode>(null);
+  const [selectedLogin, setSelectedLogin] = useState<"mera" | "privy" | "direct" | "auto" | null>(mera.address ? "mera" : "auto");
+  const [relayError, setRelayError] = useState("Checking sponsored voting...");
+  const [voteStatus, setVoteStatus] = useState<{ address: string; message: string }>();
 
   // User preference for relay vs privy mode (only matters when logged in via Privy)
   // Default to relay (EIP-7702) when available, but allow toggle to privy (EIP-4337) for debugging
   const [preferRelay, setPreferRelay] = useState(true);
+  const authMode: AuthMode = selectedLogin === "mera" ? (mera.address ? "mera" : null)
+    : (selectedLogin === "privy" || selectedLogin === "auto") && authenticated && walletConnected
+      ? (RELAY_CONFIG.enabled && preferRelay ? "relay" : "privy")
+      : (selectedLogin === "direct" || selectedLogin === "auto") && walletConnected ? "direct"
+      : null;
 
   // Get embedded wallet address (for native Privy transactions)
   const embeddedWallet = wallets.find((w) => w.walletClientType === "privy");
@@ -52,23 +60,21 @@ function App() {
     setFrameCallback,
   } = useSocket();
 
-  // Detect auth mode based on connection state and user preference
   useEffect(() => {
-    if (authenticated && walletConnected) {
-      // User logged in via Privy (has embedded wallet or linked wallet)
-      // Use relay mode (EIP-7702) if enabled and preferred, otherwise use Privy's native gas sponsorship (EIP-4337)
-      if (RELAY_CONFIG.enabled && preferRelay) {
-        setAuthMode("relay");
-      } else {
-        setAuthMode("privy");
+    if (selectedLogin !== "mera" || !MERA_ENABLED) return;
+    const controller = new AbortController();
+    const check = async () => {
+      try {
+        await relayHealth(controller.signal);
+        if (!controller.signal.aborted) setRelayError("");
+      } catch (error) {
+        if (!controller.signal.aborted) setRelayError(error instanceof Error ? error.message : "Sponsored voting unavailable.");
       }
-    } else if (!authenticated && walletConnected && connector) {
-      // User connected directly via wagmi (EOA)
-      setAuthMode("direct");
-    } else if (!authenticated && !walletConnected) {
-      setAuthMode(null);
-    }
-  }, [authenticated, walletConnected, connector, preferRelay]);
+    };
+    void check();
+    const interval = setInterval(check, 15000);
+    return () => { controller.abort(); clearInterval(interval); };
+  }, [selectedLogin]);
 
   // Prompt to switch chain if connected to wrong network (for direct wallet connections)
   useEffect(() => {
@@ -95,7 +101,7 @@ function App() {
   // Connect Privy wallet to wagmi when user authenticates
   useEffect(() => {
     const connectWallet = async () => {
-      if (authenticated && walletsReady && wallets.length > 0 && !walletConnected) {
+      if ((selectedLogin === "privy" || selectedLogin === "auto") && authenticated && walletsReady && wallets.length > 0 && !walletConnected) {
         // Find embedded wallet or use the first available wallet
         const embeddedWallet = wallets.find((w) => w.walletClientType === "privy");
         const walletToConnect = embeddedWallet || wallets[0];
@@ -110,22 +116,27 @@ function App() {
       }
     };
     connectWallet();
-  }, [authenticated, walletsReady, wallets, walletConnected, setActiveWallet]);
+  }, [authenticated, walletsReady, wallets, walletConnected, setActiveWallet, selectedLogin]);
 
   // Handle Privy login (email/social) - creates embedded wallet with AA
-  const handlePrivyLogin = useCallback(() => {
+  const handlePrivyLogin = () => {
+    mera.lock();
+    setSelectedLogin("privy");
     if (!authenticated) {
       login();
     }
-  }, [authenticated, login]);
+  };
 
   // Handle direct wallet connection (EOA - user pays gas)
-  const handleDirectConnect = useCallback(async () => {
+  const handleDirectConnect = async () => {
+    mera.lock();
+    setSelectedLogin(null);
     try {
       await connect(
         { connector: injectedConnector },
         {
           onSuccess: () => {
+            setSelectedLogin("direct");
             // After connection, switch to Monad Testnet
             switchChain({ chainId: monadTestnet.id });
           },
@@ -134,28 +145,47 @@ function App() {
     } catch (err) {
       console.error("Failed to connect wallet:", err);
     }
-  }, [connect, injectedConnector, switchChain]);
+  };
 
   // Handle disconnect for all modes
-  const handleDisconnect = useCallback(() => {
+  const handleDisconnect = () => {
+    mera.lock();
     if (authMode === "privy" || authMode === "relay") {
       logout();
     } else if (authMode === "direct") {
       disconnectWagmi();
     }
-    setAuthMode(null);
-  }, [authMode, logout, disconnectWagmi]);
+    setSelectedLogin(null);
+  };
+
+  const handlePasskey = (mode: "create" | "discover" | "unlock") => {
+    setSelectedLogin("mera");
+    void mera.connect(mode);
+  };
 
   // Determine connection state
-  const isLoggedIn = authMode !== null && walletConnected;
-  const canVote = isLoggedIn;
+  const isLoggedIn = authMode === "mera" ? !!mera.address : authMode !== null && walletConnected;
+  const passkeyDisabledReason = !MERA_ENABLED ? "Passkey voting is temporarily unavailable. Account recovery is available."
+    : !mera.unlocked ? "Unlock your passkey account to vote." : relayError;
+  const canVote = isLoggedIn && (authMode !== "mera" || !passkeyDisabledReason);
   const isLoading = !ready || isConnecting;
 
   // Get display address - use embedded wallet for Privy/relay users
   // For direct EOA connections, use the connected address
-  const displayAddress = (authMode === "privy" || authMode === "relay")
+  const displayAddress = authMode === "mera" ? mera.address : (authMode === "privy" || authMode === "relay")
     ? embeddedWalletAddress
-    : address;
+    : authMode === "direct" ? address : undefined;
+
+  const checkVote = async () => {
+    if (!displayAddress) return;
+    setVoteStatus({ address: displayAddress, message: "Checking your previous vote..." });
+    try {
+      const message = await checkPendingVote(displayAddress as Address, AbortSignal.timeout(35000));
+      setVoteStatus({ address: displayAddress, message });
+    } catch (error) {
+      setVoteStatus({ address: displayAddress, message: error instanceof Error ? error.message : "Could not check your vote." });
+    }
+  };
 
   // Copy address state
   const [copied, setCopied] = useState(false);
@@ -181,7 +211,7 @@ function App() {
           {isLoggedIn ? (
             <div className="wallet-info">
               <span className="auth-badge" data-mode={authMode}>
-                {authMode === "relay" ? "EIP-7702" : authMode === "privy" ? "EIP-4337" : "EOA"}
+                {authMode === "mera" ? "Passkey" : authMode === "relay" ? "EIP-7702" : authMode === "privy" ? "EIP-4337" : "EOA"}
               </span>
               <span className="address" title={displayAddress || undefined}>
                 {displayAddress
@@ -194,7 +224,7 @@ function App() {
                 </button>
               )}
               {/* Toggle between EIP-7702 (relay) and EIP-4337 (privy) modes */}
-              {authenticated && RELAY_CONFIG.enabled && (
+              {(authMode === "privy" || authMode === "relay") && RELAY_CONFIG.enabled && (
                 <button
                   onClick={() => setPreferRelay(!preferRelay)}
                   className="mode-toggle-btn"
@@ -203,6 +233,14 @@ function App() {
                   {preferRelay ? "Use 4337" : "Use 7702"}
                 </button>
               )}
+              {authMode === "mera" && <>
+                <button className="disconnect-btn" disabled={mera.busy} onClick={() => mera.unlocked ? mera.lock() : handlePasskey("unlock")}>
+                  {mera.unlocked ? "Lock" : "Unlock"}
+                </button>
+                <button className="disconnect-btn" disabled={mera.busy} onClick={() => void mera.revealPhrase()}>Back up account</button>
+                <button className="disconnect-btn" disabled={mera.busy} onClick={() => handlePasskey("discover")}>Switch passkey</button>
+              </>}
+              {(authMode === "mera" || authMode === "relay") && <button className="disconnect-btn" onClick={() => void checkVote()}>Check pending vote</button>}
               {(authMode === "privy" || authMode === "relay") && !walletConnected && (
                 <span className="connecting"> (connecting wallet...)</span>
               )}
@@ -213,6 +251,8 @@ function App() {
           ) : (
             <>
               <div className="login-options">
+                {MERA_ENABLED && <button className="connect-btn" disabled={mera.busy} onClick={() => handlePasskey("create")}>Create passkey account</button>}
+                <button className="connect-btn wallet-btn" disabled={mera.busy} onClick={() => handlePasskey("discover")}>Use existing passkey</button>
                 <button
                   onClick={handlePrivyLogin}
                   disabled={isLoading}
@@ -232,6 +272,20 @@ function App() {
             </>
           )}
         </div>
+
+        {selectedLogin === "mera" && <div className="passkey-status" aria-live="polite">
+          {mera.busy && <p>Complete the passkey prompt on your device. <button onClick={mera.lock}>Cancel</button></p>}
+          {mera.error && <p className="error">{mera.error}</p>}
+          {!isLoggedIn && <p>A new passkey creates a separate wallet. Existing wallets keep their own addresses.</p>}
+        </div>}
+        {voteStatus?.address === displayAddress && <p className="passkey-status" role="status">{voteStatus?.message}</p>}
+        {mera.phrase && <section className="passkey-backup" aria-label="Account recovery phrase">
+          <h2>Back up your account</h2>
+          <p>Keep these words private. Anyone with them can control this wallet. They hide automatically after one minute.</p>
+          <p className="recovery-phrase">{mera.phrase}</p>
+          <p>Import into an EVM wallet using path <code>m/44'/60'/0'/0/0</code> and an empty passphrase, then use Connect Wallet. Direct voting requires MON. This restores your wallet, not the original passkey.</p>
+          <button className="disconnect-btn" onClick={mera.hidePhrase}>Hide recovery phrase</button>
+        </section>}
 
         <div className="connection-status-bar">
           <span className={`status-dot ${indexerConnected ? "connected" : ""}`} />
@@ -269,12 +323,12 @@ function App() {
           <div className="controls-column">
             <div className="controls-chat-row">
               <div className="controls-container">
-                <VoteButtons disabled={!canVote} authMode={authMode} />
+                <VoteButtons key={`${authMode}:${displayAddress}`} disabled={!canVote} disabledReason={authMode === "mera" ? passkeyDisabledReason : undefined} authMode={authMode} meraVote={mera.vote} />
               </div>
 
               <VoteChat
                 votes={recentVotes}
-                userAddress={(authMode === "privy" || authMode === "relay") ? embeddedWalletAddress : address}
+                userAddress={displayAddress}
               />
             </div>
 
